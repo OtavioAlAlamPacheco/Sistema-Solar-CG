@@ -1,12 +1,6 @@
- 
-
-
 import {
   cameraParaPlaneta,
-  carregarDadosPlaneta,
   arredondado,
-  getOrbitNode,
-  calcularOrbita
 } from './functions.js';
 
 import {
@@ -18,7 +12,9 @@ import {
   posicoesMars,
   posicoesJupiter,
   posicoesSaturn,
-  posicoesMoon
+  posicoesMoon,
+  posicoesPioneer10,
+  posicoesPioneer11
 } from './script.js';
 
 
@@ -31,9 +27,9 @@ let movendoParaBaixo = false;
 
 
 // de princípio estava atualizando os booleanos do 
-// keydown repetidas vezes. Por questão de desempenho,
-// adicionei o objeto teclasAtivas para controlar se
-// a tecla já está ativa ou não.
+// keydown repetidas vezes. Para não executar o có-
+// digo múltiplas vezes enquanto segura, criei o
+// teclasAtivas.
 
 let teclasAtivas = {};
 
@@ -61,7 +57,7 @@ window.addEventListener("keydown", function(event) {
 
       case "z":
         if (infoCamera.proximoPlaneta === 0) {
-          infoCamera.proximoPlaneta = 7;
+          infoCamera.proximoPlaneta = 9;
         }
         else {
           infoCamera.proximoPlaneta--;
@@ -73,7 +69,7 @@ window.addEventListener("keydown", function(event) {
         break;
       
       case "x":
-        if (infoCamera.proximoPlaneta === 7) {
+        if (infoCamera.proximoPlaneta === 9) {
           infoCamera.proximoPlaneta = 0;
         }
         else {
@@ -86,14 +82,64 @@ window.addEventListener("keydown", function(event) {
         break;
 
       case "c":
-        console.log("Apertou C!")
-        console.log(infoCamera.cameraSolta);
-        infoCamera.cameraSolta = (!infoCamera.cameraSolta);
-        console.log(infoCamera.cameraSolta);
+        infoCamera.cameraSolta = !infoCamera.cameraSolta;
+
+        if (infoCamera.cameraSolta) {
+            const dia = infoMundo.tempoPercorrido;
+            const p = infoCamera.proximoPlaneta;
+            let planetaPos;
+
+            switch (p) {
+                case 0: planetaPos = { x: 0, y: 0, z: 0 }; break;
+                case 1: planetaPos = posicoesMercury[dia % posicoesMercury.length]; break;
+                case 2: planetaPos = posicoesVenus[dia % posicoesVenus.length]; break;
+                case 3: planetaPos = posicoesEarth[dia % posicoesEarth.length]; break;
+                case 4: planetaPos = posicoesMoon[dia % posicoesMoon.length]; break;
+                case 5: planetaPos = posicoesMars[dia % posicoesMars.length]; break;
+                case 6: planetaPos = posicoesJupiter[dia % posicoesJupiter.length]; break;
+                case 7: planetaPos = posicoesSaturn[dia % posicoesSaturn.length]; break;
+                case 8: planetaPos = posicoesPioneer10[dia % posicoesPioneer10.length]; break;
+                case 9: planetaPos = posicoesPioneer11[dia % posicoesPioneer11.length]; break;
+            }
+
+            const target = [planetaPos.x, planetaPos.y, planetaPos.z];
+            const cameraPosition = [infoCamera.x, infoCamera.y, infoCamera.z];
+
+            // nova direção
+            const dx = target[0] - cameraPosition[0];
+            const dy = target[1] - cameraPosition[1];
+            const dz = target[2] - cameraPosition[2];
+            const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            
+            if (len > 0) {
+                infoCamera.lookDir = [dx / len, dy / len, dz / len];
+            }
+
+            infoCamera.pitch = Math.asin(infoCamera.lookDir[1]);
+            infoCamera.yaw = Math.atan2(infoCamera.lookDir[2], infoCamera.lookDir[0]);
+
+            yawGraus = radianosParaGraus(infoCamera.yaw);
+            pitchGraus = radianosParaGraus(infoCamera.pitch);
+
+            const cosYaw = Math.cos(infoCamera.yaw);
+            const sinYaw = Math.sin(infoCamera.yaw);
+
+            infoCamera.leftDir = [
+              arredondado(-sinYaw),
+              arredondado(0),
+              arredondado(cosYaw)
+            ];
+
+            infoCamera.upDir = [
+              infoCamera.leftDir[1] * infoCamera.lookDir[2] - infoCamera.leftDir[2] * infoCamera.lookDir[1],
+              infoCamera.leftDir[2] * infoCamera.lookDir[0] - infoCamera.leftDir[0] * infoCamera.lookDir[2],
+              infoCamera.leftDir[0] * infoCamera.lookDir[1] - infoCamera.leftDir[1] * infoCamera.lookDir[0]
+            ];
+        }
         break;
     }
 
-    teclasAtivas[event.key] = true; // Marca a tecla como ativa
+    teclasAtivas[event.key] = true;
   }
 });
 
@@ -124,11 +170,12 @@ window.addEventListener("keyup", function(event) {
 
 window.addEventListener("wheel", function(event) {
 
-  // verifica se a tecla é o control
+  // scroll para cima
   if (event.deltaY < 0) {
     infoCamera.velocidade++;
   }
 
+  // scroll para baixo
   else if (infoCamera.velocidade > 0) {
     infoCamera.velocidade--;
   }
@@ -152,8 +199,9 @@ window.addEventListener("mouseup", function() {
   arrastandoMouse = false;
 });
 
-var yawGraus = 180; // ângulo horizontal
-var pitchGraus = 0; // ângulo vertical
+const radianosParaGraus = r => r * 180 / Math.PI;
+var yawGraus = radianosParaGraus(infoCamera.yaw);       // ângulo horizontal
+var pitchGraus = radianosParaGraus(infoCamera.pitch);   // ângulo vertical
 
 canvas.addEventListener("mousemove", function(event) {
   if (!arrastandoMouse) return;
@@ -161,9 +209,8 @@ canvas.addEventListener("mousemove", function(event) {
   const deltaX = event.clientX - ultimoX;
   const deltaY = event.clientY - ultimoY;
 
-  const sensibilidade = 0.2; // pode ajustar
+  const sensibilidade = 0.2;
 
-  // Apenas atualiza os ângulos, não mexe na câmera aqui!
   yawGraus += deltaX * sensibilidade;
   pitchGraus += -deltaY * sensibilidade;
 
@@ -176,7 +223,28 @@ canvas.addEventListener("mousemove", function(event) {
 
 
 
-// Loop de movimentação contínua
+ //          Interface do HTML         \\
+// - _ - _ - _ - _ - _ - _ - _ - _ - _ -\\
+
+const timeSlider = document.getElementById('timeSlider');
+const dateDisplay = document.getElementById('dateDisplay');
+const playPauseBtn = document.getElementById('playPauseBtn');
+
+timeSlider.addEventListener('input', function() {
+    infoMundo.tempoPercorrido = parseInt(this.value);
+    dateDisplay.textContent = `Dia ${this.value}`;
+});
+
+playPauseBtn.addEventListener('click', function() {
+    infoMundo.emPausa = !infoMundo.emPausa;
+    this.textContent = infoMundo.emPausa ? 'Pausar' : 'Retomar';
+});
+
+
+
+ //         Movimentação de câmera         \\
+// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ -\\
+
 setInterval(function() {
 
   var cameraSolta = infoCamera.cameraSolta;
@@ -185,48 +253,48 @@ setInterval(function() {
     cameraParaPlaneta();
   }
   else {
+    const fator = 20;
 
     if (movendoParaFrente) {
-      infoCamera.x += infoCamera.lookDir[0] * (10 * infoCamera.velocidade);
-      infoCamera.y += infoCamera.lookDir[1] * (10 * infoCamera.velocidade);
-      infoCamera.z += infoCamera.lookDir[2] * (10 * infoCamera.velocidade);
+      infoCamera.x += infoCamera.lookDir[0] * (fator * infoCamera.velocidade);
+      infoCamera.y += infoCamera.lookDir[1] * (fator * infoCamera.velocidade);
+      infoCamera.z += infoCamera.lookDir[2] * (fator * infoCamera.velocidade);
     }
 
     if (movendoParaEsquerda) {
-      infoCamera.x -= infoCamera.leftDir[0] * (10 * infoCamera.velocidade);
-      infoCamera.y -= infoCamera.leftDir[1] * (10 * infoCamera.velocidade);
-      infoCamera.z -= infoCamera.leftDir[2] * (10 * infoCamera.velocidade);
+      infoCamera.x -= infoCamera.leftDir[0] * (fator * infoCamera.velocidade);
+      infoCamera.y -= infoCamera.leftDir[1] * (fator * infoCamera.velocidade);
+      infoCamera.z -= infoCamera.leftDir[2] * (fator * infoCamera.velocidade);
     }
 
     if (movendoParaDireita) {
-      infoCamera.x += infoCamera.leftDir[0] * (10 * infoCamera.velocidade);
-      infoCamera.y += infoCamera.leftDir[1] * (10 * infoCamera.velocidade);
-      infoCamera.z += infoCamera.leftDir[2] * (10 * infoCamera.velocidade);
+      infoCamera.x += infoCamera.leftDir[0] * (fator * infoCamera.velocidade);
+      infoCamera.y += infoCamera.leftDir[1] * (fator * infoCamera.velocidade);
+      infoCamera.z += infoCamera.leftDir[2] * (fator * infoCamera.velocidade);
     }
 
     if (movendoParaTras) {
-      infoCamera.x -= infoCamera.lookDir[0] * (10 * infoCamera.velocidade);
-      infoCamera.y -= infoCamera.lookDir[1] * (10 * infoCamera.velocidade);
-      infoCamera.z -= infoCamera.lookDir[2] * (10 * infoCamera.velocidade);
+      infoCamera.x -= infoCamera.lookDir[0] * (fator * infoCamera.velocidade);
+      infoCamera.y -= infoCamera.lookDir[1] * (fator * infoCamera.velocidade);
+      infoCamera.z -= infoCamera.lookDir[2] * (fator * infoCamera.velocidade);
     }
 
     if (movendoParaCima) {
-      infoCamera.x += infoCamera.upDir[0] * (10 * infoCamera.velocidade);
-      infoCamera.y += infoCamera.upDir[1] * (10 * infoCamera.velocidade);
-      infoCamera.z += infoCamera.upDir[2] * (10 * infoCamera.velocidade);
+      infoCamera.x += infoCamera.upDir[0] * (fator * infoCamera.velocidade);
+      infoCamera.y += infoCamera.upDir[1] * (fator * infoCamera.velocidade);
+      infoCamera.z += infoCamera.upDir[2] * (fator * infoCamera.velocidade);
     }
 
     if (movendoParaBaixo) {
-      infoCamera.x -= infoCamera.upDir[0] * (10 * infoCamera.velocidade);
-      infoCamera.y -= infoCamera.upDir[1] * (10 * infoCamera.velocidade);
-      infoCamera.z -= infoCamera.upDir[2] * (10 * infoCamera.velocidade);
+      infoCamera.x -= infoCamera.upDir[0] * (fator * infoCamera.velocidade);
+      infoCamera.y -= infoCamera.upDir[1] * (fator * infoCamera.velocidade);
+      infoCamera.z -= infoCamera.upDir[2] * (fator * infoCamera.velocidade);
     }
   }
 
 
   if (arrastandoMouse) {
 
-      // Atualiza ângulos em radianos
     const grausParaRadianos = g => g * Math.PI / 180;
     infoCamera.yaw = grausParaRadianos(yawGraus);
     infoCamera.pitch = grausParaRadianos(pitchGraus);
@@ -257,13 +325,16 @@ setInterval(function() {
     ];
   }
 
-
-  if (infoMundo.tempoPercorrido > infoMundo.tempoMax) {
-    infoMundo.tempoPercorrido = 0;
-    console.log("Resetando o tempo!!");
-  }
-  else {
-    infoMundo.tempoPercorrido += 1;
+  // se tiver pausado a simulação, não vai atualizar o tempo.
+  if (!infoMundo.emPausa) {
+    if (infoMundo.tempoPercorrido >= infoMundo.tempoMax) {
+      infoMundo.tempoPercorrido = 0;
+    } else {
+      infoMundo.tempoPercorrido += 1;
+    }
+    
+    timeSlider.value = infoMundo.tempoPercorrido;
+    dateDisplay.textContent = `Dia ${infoMundo.tempoPercorrido}`;
   }
 
 
@@ -273,5 +344,5 @@ setInterval(function() {
     console.log("Seguindo o planeta ", infoCamera.proximoPlaneta);
   }
 
-}, 18); // 1000ms é 1 segundo
-        // 1000 / 20 = 66.6 FPS
+}, 14); // 1000ms é 1 segundo
+        // 1000 / 16 = 62.5 FPS

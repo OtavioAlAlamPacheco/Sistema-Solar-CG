@@ -1,15 +1,16 @@
-
-
 import {
   infoMundo,
   infoCamera,
+  size,
   posicoesMercury,
   posicoesVenus,
   posicoesEarth,
   posicoesMars,
   posicoesJupiter,
   posicoesSaturn,
-  posicoesMoon
+  posicoesMoon,
+  posicoesPioneer10,
+  posicoesPioneer11,
 } from './script.js';
 
 
@@ -20,7 +21,7 @@ export async function carregarArquivo(nomeArquivo) {
     const texto = await resposta.text();
     const linhas = texto.trim().split("\n");
 
-    // Ignorar a primeira linha
+    // ignora a primeira linha, que é a descrição das colunas
     const linhasDados = linhas.slice(1);
 
     const orbitas = linhasDados.map(linha => {
@@ -59,68 +60,87 @@ export function AUparaKM(valorAU) {
 
 
 export function cameraParaPlaneta() {
-  
+
   const i = infoCamera.proximoPlaneta;
+  const sizePlaneta = size[i];
   const dia = infoMundo.tempoPercorrido;
   var x, y, z;
 
+  // define um deslocamento da câmera em relação ao planeta que está seguindo
+  const offsetX = 100 * sizePlaneta;
+  const offsetY = 0;
+  const offsetZ = 1000.36 * sizePlaneta;
+
   switch (i) {
 
-      // sun
+    // sun
     case 0:
-      x = 0 + 2000;
-      y = 0 + 0;
-      z = 0 - 13600;
-
+      x = 0 + offsetX;
+      y = 0 + offsetY;
+      z = 0 + offsetZ;
       break;
 
-      // mercury
+    // mercury
     case 1:
-      var x = posicoesMercury[dia].x + 2000;
-      var y = posicoesMercury[dia].y + 0;
-      var z = posicoesMercury[dia].z - 13600;
+      x = posicoesMercury[dia % posicoesMercury.length].x + offsetX;
+      y = posicoesMercury[dia % posicoesMercury.length].y + offsetY;
+      z = posicoesMercury[dia % posicoesMercury.length].z + offsetZ;
       break;
 
-      // venus
+    // venus
     case 2:
-      x = posicoesVenus[dia].x + 2000;
-      y = posicoesVenus[dia].y + 0;
-      z = posicoesVenus[dia].z - 13600;
+      x = posicoesVenus[dia % posicoesVenus.length].x + offsetX;
+      y = posicoesVenus[dia % posicoesVenus.length].y + offsetY;
+      z = posicoesVenus[dia % posicoesVenus.length].z + offsetZ;
       break;
 
-      // earth
+    // earth
     case 3:
-      x = posicoesEarth[dia].x + 2000;
-      y = posicoesEarth[dia].y + 0;
-      z = posicoesEarth[dia].z - 13600;
+      x = posicoesEarth[dia % posicoesEarth.length].x + offsetX;
+      y = posicoesEarth[dia % posicoesEarth.length].y + offsetY;
+      z = posicoesEarth[dia % posicoesEarth.length].z + offsetZ;
       break;
 
-      // moon
+    // moon
     case 4:
-      x = posicoesMoon[dia].x + 2000;
-      y = posicoesMoon[dia].y + 0;
-      z = posicoesMoon[dia].z - 13600;
+      x = posicoesMoon[dia % posicoesMoon.length].x + offsetX;
+      y = posicoesMoon[dia % posicoesMoon.length].y + offsetY;
+      z = posicoesMoon[dia % posicoesMoon.length].z + offsetZ;
       break;
 
-      // mars
+    // mars
     case 5:
-      x = posicoesMars[dia].x + 2000;
-      y = posicoesMars[dia].y + 0;
-      z = posicoesMars[dia].z - 13600;
+      x = posicoesMars[dia % posicoesMars.length].x + offsetX;
+      y = posicoesMars[dia % posicoesMars.length].y + offsetY;
+      z = posicoesMars[dia % posicoesMars.length].z + offsetZ;
       break;
 
-      // jupiter
+    // jupiter
     case 6:
-      x = posicoesJupiter[dia].x + 2000;
-      y = posicoesJupiter[dia].y + 0;
-      z = posicoesJupiter[dia].z - 13600;
+      x = posicoesJupiter[dia % posicoesJupiter.length].x + offsetX;
+      y = posicoesJupiter[dia % posicoesJupiter.length].y + offsetY;
+      z = posicoesJupiter[dia % posicoesJupiter.length].z + offsetZ;
       break;
 
-      // saturn
+    // saturn
     case 7:
-      x = posicoesSaturn[dia].x + 2000;
-      y = posicoesSaturn[dia].y + 0;
-      z = posicoesSaturn[dia].z - 13600;
+      x = posicoesSaturn[dia % posicoesSaturn.length].x + offsetX;
+      y = posicoesSaturn[dia % posicoesSaturn.length].y + offsetY;
+      z = posicoesSaturn[dia % posicoesSaturn.length].z + offsetZ;
+      break;
+
+    // pioneer 10
+    case 8:
+      x = posicoesPioneer10[dia % posicoesPioneer10.length].x + offsetX;
+      y = posicoesPioneer10[dia % posicoesPioneer10.length].y + offsetY;
+      z = posicoesPioneer10[dia % posicoesPioneer10.length].z + offsetZ;
+      break;
+
+    // pioneer 11
+    case 9:
+      x = posicoesPioneer11[dia % posicoesPioneer11.length].x + offsetX;
+      y = posicoesPioneer11[dia % posicoesPioneer11.length].y + offsetY;
+      z = posicoesPioneer11[dia % posicoesPioneer11.length].z + offsetZ;
       break;
   }
 
@@ -132,142 +152,10 @@ export function cameraParaPlaneta() {
 
 
 
-
-export function criarBufferDaOrbita(gl, periodoOrbital, posicoes) {
-  const totalComponentes = 3 * periodoOrbital;
-  const dadosOrbita = new Float32Array(totalComponentes);
-
-  const buffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, dadosOrbita, gl.DYNAMIC_DRAW);
-
-  // Chama a função de preenchimento
-  atualizarBufferDaOrbita(gl, buffer, posicoes, periodoOrbital);
-
-  return buffer;
-}
-
-
-export function atualizarBufferDaOrbita(gl, buffer, posicoes, periodoOrbital) {
-  const dados = new Float32Array(3 * periodoOrbital);
-
-  for (let i = 0; i < periodoOrbital; i++) {
-    const p = posicoes[i];
-    if (!p) continue; // segurança contra valores inválidos
-
-    dados[3 * i + 0] = p.x;
-    dados[3 * i + 1] = p.y;
-    dados[3 * i + 2] = p.z;
-  }
-
-  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferSubData(gl.ARRAY_BUFFER, 0, dados);
-}
-
-
-
-// Importante: garanta que os arrays posicoes.x, posicoes.y, 
-// posicoes.z estejam completos com pelo menos periodoOrbital 
-// elementos, para evitar acessos indefinidos.
-
-
-
-
-
-
-export async function carregarDadosPlaneta(nomeArquivo) {
-  try {
-    const resposta = await fetch(nomeArquivo);
-    const texto = await resposta.text();
-    const linhas = texto.trim().split("\n");
-
-    const planeta = {
-      posicoes: [],
-      diametro: parseFloat(linhas[0]),          // km
-      periodoRotacao: parseFloat(linhas[1]),    // horas
-      distanciaSol: parseFloat(linhas[2]),      // x * 10^6 km
-      periodoOrbital: parseFloat(linhas[3]),    // dias
-      velocidadeOrbital: parseFloat(linhas[4]), // km/s
-      inclinacaoOrbital: parseFloat(linhas[5]), // graus
-      obliquidadeOrbital: parseFloat(linhas[6]) // graus
-    };
-
-    // console.log("Dados de:", nomeArquivo);
-    // console.log(planeta);
-    return planeta;
-
-  } catch (erro) {
-    console.error("Erro ao carregar o arquivo:", erro);
-  }
-}
-
-
 // isso aqui é uma gambiarra... no momento que eu clicava no canvas,
 // estava mexendo no valor do lookDir. Depois de muito investigar,
 // cheguei nessa gambiarra, que parece não trazer problemas pro código.
 export function arredondado(valor) {
   const fator = Math.pow(10, 6);
   return Math.round(valor * fator) / fator;
-}
-
-
-// essa função é utilizada pra aplicar as translações de forma dinâmica.
-export function getOrbitNode(planeta) {
-  
-  const dias = infoMundo.tempoPercorrido;
-  const ciclo = planeta.periodoOrbital;
-  const inclinacao = planeta.inclinacaoOrbital;
-
-  const fracaoOrbital = (dias % ciclo) / ciclo;
-  const anguloOrbital = fracaoOrbital * 2 * Math.PI;       // radianos
-  const amplitudeY = Math.sin(inclinacao * Math.PI / 180);
-
-  var raio = planeta.distanciaSol;   // x * 10^6 km
-  raio = raio * 100000;              // km
-  raio = raio * infoMundo.escala;
-
-  // posições do planeta ao redor do sol
-  var x = Math.cos(anguloOrbital) * raio;
-  var y = Math.sin(anguloOrbital * 2) * amplitudeY * raio;
-  var z = Math.sin(anguloOrbital) * raio;
-
-  return { x, y, z }
-}
-
-
-
-
-
-
-export function calcularOrbita(planeta) {
-
-  const ciclo = planeta.periodoOrbital;
-  const inclinacao = planeta.inclinacaoOrbital;
-  const amplitudeY = Math.sin(inclinacao * Math.PI / 180);
-
-  var raio = planeta.distanciaSol;   // x * 10^6 km
-  raio = raio * 100000;              // km
-  raio = raio * infoMundo.escala;
-
-  var vetorPosicoes = [];
-
-  for (var dias = 0; dias < ciclo; dias++) {
-    
-    var fracaoOrbital = (dias) / ciclo;               // já que agora calcula de todos os pontos, não precisa ser (dias % ciclos)
-    var anguloOrbital = fracaoOrbital * 2 * Math.PI;  // radianos
-
-    // posições do planeta ao redor do sol
-    var x = Math.cos(anguloOrbital) * raio;
-    var y = Math.sin(anguloOrbital * 2) * amplitudeY * raio;
-    var z = Math.sin(anguloOrbital) * raio;
-
-    vetorPosicoes [dias + 0] = x;
-    vetorPosicoes [dias + 1] = y;
-    vetorPosicoes [dias + 2] = z;
-
-    // console.log("Dia: ", dias)
-    // console.log(vetorPosicoes[dias + 0], vetorPosicoes[dias + 1], vetorPosicoes[dias + 2])
-  }
-
-  return vetorPosicoes;
 }

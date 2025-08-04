@@ -1,39 +1,135 @@
-
 "use strict";
 
-var vs = `#version 300 es
-
+var vsPlanets = `#version 300 es
 in vec4 a_position;
-in vec4 a_color;
-
 uniform mat4 u_matrix;
-
 out vec4 v_color;
 
 void main() {
-  // Multiply the position by the matrix.
   gl_Position = u_matrix * a_position;
-
-  // Pass the color to the fragment shader.
-  v_color = a_color;
+  v_color = vec4(1.0, 1.0, 1.0, 1.0);
 }
 `;
 
-var fs = `#version 300 es
+var fsPlanets = `#version 300 es
 precision highp float;
-
-// Passed in from the vertex shader.
 in vec4 v_color;
-
 uniform vec4 u_colorMult;
 uniform vec4 u_colorOffset;
-
 out vec4 outColor;
 
 void main() {
-   outColor = v_color * u_colorMult + u_colorOffset;
+  outColor = v_color * u_colorMult + u_colorOffset;
 }
 `;
+
+var vsOrbit = `#version 300 es
+in vec4 a_position;
+uniform mat4 u_matrix;
+
+void main() {
+  gl_Position = u_matrix * a_position;
+}
+`;
+
+var fsOrbit = `#version 300 es
+precision highp float;
+uniform vec4 u_color;
+out vec4 outColor;
+
+void main() {
+  outColor = u_color;
+}
+`;
+
+// fonte para o shader do Sol: https://sangillee.com/2024-06-29-create-realistic-sun-with-shaders
+
+var vsSun = `#version 300 es
+in vec4 a_position;
+in vec3 a_normal;
+
+uniform mat4 u_matrix;
+uniform mat4 u_world;
+
+out vec3 v_normal;
+out vec3 v_worldPosition;
+
+void main() {
+  gl_Position = u_matrix * a_position;
+  v_worldPosition = (u_world * a_position).xyz;
+  v_normal = mat3(u_world) * a_normal;
+}
+`;
+
+var fsSun = `#version 300 es
+precision highp float;
+
+uniform float u_time;
+uniform vec3 u_cameraPosition;
+
+in vec3 v_normal;
+in vec3 v_worldPosition;
+
+out vec4 outColor;
+
+float random(vec3 st) {
+    return fract(sin(dot(st.xyz, vec3(12.9898, 78.233, 45.5432))) * 43758.5453123);
+}
+
+float noise(vec3 st) {
+    vec3 i = floor(st);
+    vec3 f = fract(st);
+
+    float a = random(i);
+    float b = random(i + vec3(1.0, 0.0, 0.0));
+    float c = random(i + vec3(0.0, 1.0, 0.0));
+    float d = random(i + vec3(1.0, 1.0, 0.0));
+    float e = random(i + vec3(0.0, 0.0, 1.0));
+    float f_ = random(i + vec3(1.0, 0.0, 1.0));
+    float g = random(i + vec3(0.0, 1.0, 1.0));
+    float h = random(i + vec3(1.0, 1.0, 1.0));
+
+    vec3 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) +
+           (c - a) * u.y * (1.0 - u.x) +
+           (d - b) * u.y * u.x +
+           (e - a) * u.z * (1.0 - u.y) * (1.0 - u.x) +
+           (f_ - b) * u.z * (1.0 - u.y) * u.x +
+           (g - c) * u.z * u.y * (1.0 - u.x) +
+           (h - d) * u.z * u.y * u.x;
+}
+
+// Fractal Brownian Motion
+float fbm(vec3 st) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 0.0;
+    for (int i = 0; i < 6; i++) {
+        value += amplitude * noise(st);
+        st *= 2.0;
+        amplitude *= 0.5;
+    }
+    return value;
+}
+
+void main() {
+    vec3 noisy_pos = v_worldPosition * 0.01 + vec3(u_time * 0.05);
+    float fbm_noise = fbm(noisy_pos);
+
+    vec3 base_color = vec3(1.0, 0.5, 0.0) * (fbm_noise + 0.5);
+    vec3 final_color = base_color;
+
+    vec3 view_dir = normalize(u_cameraPosition - v_worldPosition);
+    vec3 normal = normalize(v_normal);
+    float fresnel = 1.0 - dot(view_dir, normal);
+    fresnel = pow(fresnel, 2.0); // Potência para controlar a intensidade do brilho
+
+    final_color += vec3(1.0, 0.8, 0.2) * fresnel;
+
+    outColor = vec4(final_color, 1.0);
+}
+`;
+
 
 var Node = function() {
   this.children = [];
@@ -42,15 +138,12 @@ var Node = function() {
 };
 
 Node.prototype.setParent = function(parent) {
-  // remove us from our parent
   if (this.parent) {
     var ndx = this.parent.children.indexOf(this);
     if (ndx >= 0) {
       this.parent.children.splice(ndx, 1);
     }
   }
-
-  // Add us to our new parent
   if (parent) {
     parent.children.push(this);
   }
@@ -59,14 +152,10 @@ Node.prototype.setParent = function(parent) {
 
 Node.prototype.updateWorldMatrix = function(matrix) {
   if (matrix) {
-    // a matrix was passed in so do the math
     m4.multiply(matrix, this.localMatrix, this.worldMatrix);
   } else {
-    // no matrix was passed in so just copy.
     m4.copy(this.localMatrix, this.worldMatrix);
   }
-
-  // now process all the children
   var worldMatrix = this.worldMatrix;
   this.children.forEach(function(child) {
     child.updateWorldMatrix(worldMatrix);
@@ -78,46 +167,38 @@ Node.prototype.updateWorldMatrix = function(matrix) {
 
 import {
   carregarArquivo,
-  criarBufferDaOrbita,
-  atualizarBufferDaOrbita,
   cameraParaPlaneta,
-  carregarDadosPlaneta,
   arredondado,
-  getOrbitNode,
-  calcularOrbita
 } from './functions.js';
 
 
- //                 Objetos importantes                 \\
-// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+ //            Objetos importantes          \\
+// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
 
 export var infoMundo = {
-  tempoPercorrido: 0,   // em dias terrestres
+  tempoPercorrido: 0,
   tempoMax: 10747,
   escala: 0.0001,
-  contadorAPAGAR: 0,
+  emPausa: true,
 }
 
 export var infoCamera = {
-  x: 70000,
+  x: 0,
   y: 0,
-  z: 0,
-  velocidade: 10,
-  leftDir: [0, 0, -1],
+  z: 150000,
+  velocidade: 20,
+  leftDir: [1, 0, 0],
   upDir: [0, 1, 0],
-  yaw: Math.PI,
+  yaw: -Math.PI / 2,
   pitch: 0,
-  lookDir: [
-            arredondado (Math.cos(0) * Math.cos(Math.PI) ),
-            arredondado (Math.sin(0) ),
-            arredondado (Math.cos(0) * Math.sin(Math.PI) )
-          ],
-
+  lookDir: [0, 0, -1],
   cameraSolta: true,
   proximoPlaneta: 0,
-  // 0 = sol, 1 = mercury, 2 = venus, 3 = earth, 4 = moon, 5 = mars, 6 = jupiter, 7 = saturn
 };
 
+
+ //               Coordenadas dos astros                \\
+// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
 
 export let posicoesMercury = await carregarArquivo("Planets/Mercury.txt");
 export let posicoesVenus = await carregarArquivo("Planets/Venus.txt");
@@ -127,12 +208,13 @@ export let posicoesJupiter = await carregarArquivo("Planets/Jupiter.txt");
 export let posicoesSaturn = await carregarArquivo("Planets/Saturn.txt");
 export let posicoesMoon = await carregarArquivo("Planets/Moon.txt");
 
-    // esses aqui não tem lá no site da NASA
-// let posicoesUranus = await carregarArquivo("Planets/Uranus.txt");
-// let posicoesNeptune = await carregarArquivo("Planets/Neptune.txt");
-// let posicoesPluto = await carregarArquivo("Planets/Pluto.txt");
+export let posicoesPioneer10 = await carregarArquivo("Others/Pioneer_10.txt");
+export let posicoesPioneer11 = await carregarArquivo("Others/Pioneer_11.txt");
 
-  // períodos orbitais
+
+ //              Período orbital dos astros             \\
+// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
 let periodoMercury = 88;
 let periodoVenus = 225;
 let periodoEarth = 365;
@@ -141,60 +223,12 @@ let periodoMars = 687;
 let periodoJupiter = 4331;
 let periodoSaturn = 10747;
 
-
-
- //                 Criando os buffers                  \\
-// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-
-var canvas = document.querySelector("#canvas");
-var gl = canvas.getContext("webgl2");
-
-const bufferMercury = criarBufferDaOrbita(gl, periodoMercury, posicoesMercury);
-const bufferVenus   = criarBufferDaOrbita(gl, periodoVenus, posicoesVenus); 
-const bufferEarth   = criarBufferDaOrbita(gl, periodoEarth, posicoesEarth); 
-const bufferMars    = criarBufferDaOrbita(gl, periodoMars, posicoesMars); 
-const bufferJupiter = criarBufferDaOrbita(gl, periodoJupiter, posicoesJupiter); 
-const bufferSaturn  = criarBufferDaOrbita(gl, periodoSaturn, posicoesSaturn); 
-const bufferMoon    = criarBufferDaOrbita(gl, periodoMoon, posicoesMoon); 
-
-const bufferOrbita = {
-  mercury: bufferMercury,
-  venus: bufferVenus,
-  earth: bufferEarth,
-  mars: bufferMars,
-  jupiter: bufferJupiter,
-  saturn: bufferSaturn,
-  moon: bufferMoon
-};
+export let size = [];
 
 
 
+async function main() {
 
-
-
-// mercury, venus, earth, mars, jupiter, saturn, uranus, neptune, pluto
-let infoMercury = await carregarDadosPlaneta("Planets antigo/Mercury.txt");
-let infoVenus = await carregarDadosPlaneta("Planets antigo/Venus.txt");
-
-let infoEarth = await carregarDadosPlaneta("Planets antigo/Earth.txt");
-infoEarth.posicoes = calcularOrbita(infoEarth);
-
-let infoMars = await carregarDadosPlaneta("Planets antigo/Mars.txt");
-let infoJupiter = await carregarDadosPlaneta("Planets antigo/Jupiter.txt");
-let infoSaturn = await carregarDadosPlaneta("Planets antigo/Saturn.txt");
-let infoUranus = await carregarDadosPlaneta("Planets antigo/Uranus.txt");
-let infoNeptune = await carregarDadosPlaneta("Planets antigo/Neptune.txt");
-let infoPluto = await carregarDadosPlaneta("Planets antigo/Pluto.txt");
-let infoMoon = await carregarDadosPlaneta("Planets antigo/Moon.txt");
-
-// console.log(infoMercury, infoVenus, infoEarth, infoMars, infoJupiter, infoSaturn, infoUranus, infoNeptune, infoPluto, infoMoon);
-
-
-
-// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-
-
-function main() {
   // Get A WebGL context
   /** @type {HTMLCanvasElement} */
   var canvas = document.querySelector("#canvas");
@@ -203,18 +237,23 @@ function main() {
     return;
   }
 
-
   // Tell the twgl to match position with a_position, n
   // normal with a_normal etc..
   twgl.setAttributePrefix("a_");
 
-  var sphereBufferInfo = flattenedPrimitives.createSphereBufferInfo(gl, 10, 12, 6);
-                                // context, radius, subdivisionsAxis, subdivisionsHeight);
-
   // setup GLSL program
-  var programInfo = twgl.createProgramInfo(gl, [vs, fs]);
+  var planetProgramInfo = twgl.createProgramInfo(gl, [vsPlanets, fsPlanets]);
+  var orbitProgramInfo = twgl.createProgramInfo(gl, [vsOrbit, fsOrbit]);
+  var sunProgramInfo = twgl.createProgramInfo(gl, [vsSun, fsSun]);
 
-  var sphereVAO = twgl.createVAOFromBufferInfo(gl, programInfo, sphereBufferInfo);
+  if (!planetProgramInfo || !orbitProgramInfo || !sunProgramInfo) {
+      console.error("Falha ao compilar um ou mais programas de shader.");
+      return;
+  }
+  
+  var sphereBufferInfo = flattenedPrimitives.createSphereBufferInfo(gl, 10, 24, 12); 
+  var sphereVAO = twgl.createVAOFromBufferInfo(gl, planetProgramInfo, sphereBufferInfo);
+  var sunVAO = twgl.createVAOFromBufferInfo(gl, sunProgramInfo, sphereBufferInfo);
 
   function degToRad(d) {
     return d * Math.PI / 180;
@@ -222,597 +261,358 @@ function main() {
 
   var fieldOfViewRadians = degToRad(60);
 
-  var objectsToDraw = [];
-  var objects = [];
 
-  // Let's make all the nodes
+ //               Tamanho dos astros                \\
+// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
+  var escala = infoMundo.escala;
+  var minSize = 0.002 / escala; 
+  var sunSize = 1392700 * escala;
+  var mercurySize = Math.max(4879 * escala, minSize);
+  var venusSize = Math.max(12104 * escala, minSize);
+  var earthSize = Math.max(12756 * escala, minSize);
+  var marsSize = Math.max(6792 * escala, minSize);
+  var jupiterSize = Math.max(142984 * escala, minSize);
+  var saturnSize = Math.max(120536 * escala, minSize);
+  var moonSize = Math.max(3475 * escala, minSize);
+
+  var pioneer10Size = minSize;
+  var pioneer11Size = minSize;
+
+  size.push(sunSize, mercurySize, venusSize, earthSize, moonSize, marsSize, jupiterSize, saturnSize, pioneer10Size, pioneer11Size);
+
+
+
+ //               Definindo os Nodes                \\
+// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
   var solarSystemNode = new Node();
 
-
-
-  // essas translations usam uma versão antiga do meu código,
-  // que calculava a posição dos planetas com base no período
-  // orbital dos planetas. Porém, elas vão ser sobrepostas 
-  // depois no drawScene, então não tem problema.
-
-  // mercury, venus, earth, mars, jupiter, saturn, uranus, neptune, pluto
+  var sunNode = new Node();
+  sunNode.localMatrix = m4.scaling(sunSize, sunSize, sunSize);
+  sunNode.drawInfo = {
+    uniforms: { 
+      u_time: 0,
+      u_cameraPosition: [0,0,0],
+      u_world: m4.identity()
+    },
+    programInfo: sunProgramInfo, 
+    bufferInfo: sphereBufferInfo, 
+    vertexArray: sunVAO,
+  };
 
   var mercuryOrbitNode = new Node();
-  // mercury orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoMercury);
-  mercuryOrbitNode.localMatrix = m4.translation(x, y, z);
+  var mercuryNode = new Node();
+  mercuryNode.localMatrix = m4.scaling(mercurySize, mercurySize, mercurySize);
+  mercuryNode.drawInfo = {
+    uniforms: { u_colorOffset: [0.6, 0.6, 0.6, 1], u_colorMult: [0.1, 0.1, 0.1, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
+  };
 
   var venusOrbitNode = new Node();
-  // venus orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoVenus);
-  venusOrbitNode.localMatrix = m4.translation(x, y, z);
-
-/*
-  var earthOrbitNode = new Node();
-  // earth orbit 100 units from the sun
-  // earthOrbitNode.localMatrix = m4.translation(400, 0, 0);
-  var {x, y, z} = getOrbitNode(infoEarth);
-  console.log("Earth orbit node: ", x, y, z);
-  earthOrbitNode.localMatrix = m4.translation(x, y, z);
-*/
+  var venusNode = new Node();
+  venusNode.localMatrix = m4.scaling(venusSize, venusSize, venusSize);
+  venusNode.drawInfo = {
+    uniforms: { u_colorOffset: [0.8, 0.6, 0.4, 1], u_colorMult: [0.2, 0.2, 0.2, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
+  };
 
   var earthOrbitNode = new Node();
-  var dia = infoEarth.periodoOrbital % infoMundo.tempoPercorrido;
-  var x = infoEarth.posicoes[dia + 0];
-  var y = infoEarth.posicoes[dia + 1];
-  var z = infoEarth.posicoes[dia + 2];
-  earthOrbitNode.localMatrix = m4.translation(x, y, z);
-
+  var earthNode = new Node();
+  earthNode.localMatrix = m4.scaling(earthSize, earthSize, earthSize);
+  earthNode.drawInfo = {
+    uniforms: { u_colorOffset: [0.2, 0.6, 0.0, 0.2], u_colorMult: [0.3, 0.5, 0.2, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
+  };
+  
   var marsOrbitNode = new Node();
-  // mars orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoMars);
-  marsOrbitNode.localMatrix = m4.translation(x, y, z);
-
-  var mercuryOrbitNode = new Node();
-  // mercury orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoMercury);
-  mercuryOrbitNode.localMatrix = m4.translation(x, y, z);
-
-  var venusOrbitNode = new Node();
-  // venus orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoVenus);
-  venusOrbitNode.localMatrix = m4.translation(x, y, z);
+  var marsNode = new Node();
+  marsNode.localMatrix = m4.scaling(marsSize, marsSize, marsSize);
+  marsNode.drawInfo = {
+    uniforms: { u_colorOffset: [1, 0.2, 0.3, 1], u_colorMult: [0.1, 0.5, 0.2, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
+  };
 
   var jupiterOrbitNode = new Node();
-  // jupiter orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoJupiter);
-  jupiterOrbitNode.localMatrix = m4.translation(x, y, z);
+  var jupiterNode = new Node();
+  jupiterNode.localMatrix = m4.scaling(jupiterSize, jupiterSize, jupiterSize);
+  jupiterNode.drawInfo = {
+    uniforms: { u_colorOffset: [0.8, 0.5, 0.2, 1], u_colorMult: [0.2, 0.2, 0.2, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
+  };
 
   var saturnOrbitNode = new Node();
-  // saturn orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoSaturn);
-  saturnOrbitNode.localMatrix = m4.translation(x, y, z);
-
-  var uranusOrbitNode = new Node();
-  // uranus orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoUranus);
-  uranusOrbitNode.localMatrix = m4.translation(x, y, z);
-  
-  var neptuneOrbitNode = new Node();
-  // neptune orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoNeptune);
-  neptuneOrbitNode.localMatrix = m4.translation(x, y, z);
-
-  var plutoOrbitNode = new Node();
-  // pluto orbit 150 units from the sun
-  var {x, y, z} = getOrbitNode(infoPluto);
-  plutoOrbitNode.localMatrix = m4.translation(x, y, z);
+  var saturnNode = new Node();
+  saturnNode.localMatrix = m4.scaling(saturnSize, saturnSize, saturnSize);
+  saturnNode.drawInfo = {
+    uniforms: { u_colorOffset: [0.8, 0.6, 0.4, 1], u_colorMult: [0.2, 0.2, 0.2, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
+  };
 
   var moonOrbitNode = new Node();
-  // moon 20 units from the earth
-  var {x, y, z} = getOrbitNode(infoMoon);
-  moonOrbitNode.localMatrix = m4.translation(x, y, z);
-
-  
-  // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-
-  var escala = 0.0001;
-
-  var sun = 1392700 * escala;
-  var mercury = 4879 * escala;
-  var venus = 12104 * escala;
-  var earth = 12756 * escala;
-  var mars = 6792 * escala;
-  var jupiter = 142984 * escala;
-  var saturn = 120536 * escala;
-  var moon = 3475 * escala;
-
-  // alguns planetas estão ficando muito pequenos, e fica difícil
-  // visualizá-los. Por isso, o tamanho mínimo vai ser 20.
-
-  if (mercury < 20) {
-    mercury = 20;
-  }
-  if (venus < 20) {
-    venus = 20;
-  }
-  if (earth < 20) {
-    earth = 20;
-  }
-  if (mars < 20) {
-    mars = 20;
-  }
-  if (jupiter < 20) {
-    jupiter = 20;
-  }
-  if (saturn < 20) {
-    saturn = 20;
-  }
-  if (moon < 20) {
-    moon = 20;
-  }
-
-
-  var sunNode = new Node();
-  sunNode.localMatrix = m4.scaling(sun, sun, sun);  // sun a the center
-  sunNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.6, 0.6, 0, 1], // yellow
-      u_colorMult:   [0.4, 0.4, 0, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var mercuryNode = new Node();
-  mercuryNode.localMatrix = m4.scaling(mercury, mercury, mercury);
-  mercuryNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.6, 0.6, 0.6, 1],  // gray
-      u_colorMult:   [0.1, 0.1, 0.1, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var venusNode = new Node();
-  venusNode.localMatrix = m4.scaling(venus, venus, venus);
-  venusNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.8, 0.6, 0.4, 1],  // light brown
-      u_colorMult:   [0.2, 0.2, 0.2, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var earthNode = new Node();
-  earthNode.localMatrix = m4.scaling(earth, earth, earth);   // make the earth twice as large
-  earthNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.2, 0.6, 0.0, 0.2],  // blue-green
-      u_colorMult:   [0.3, 0.5, 0.2, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var marsNode = new Node();
-  marsNode.localMatrix = m4.scaling(mars, mars, mars);
-  marsNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [1, 0.2, 0.3, 1],  // orange
-      u_colorMult:   [0.1, 0.5, 0.2, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var jupiterNode = new Node();
-  jupiterNode.localMatrix = m4.scaling(jupiter, jupiter, jupiter);
-  jupiterNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.8, 0.5, 0.2, 1],  // light brown
-      u_colorMult:   [0.2, 0.2, 0.2, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var saturnNode = new Node();
-  saturnNode.localMatrix = m4.scaling(saturn, saturn, saturn);
-  saturnNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.8, 0.6, 0.4, 1],  // light brown
-      u_colorMult:   [0.2, 0.2, 0.2, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var uranusNode = new Node();
-  uranusNode.localMatrix = m4.scaling(20, 20, 20);
-  uranusNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.4, 0.6, 0.8, 1],  // light blue
-      u_colorMult:   [0.2, 0.2, 0.2, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var neptuneNode = new Node();
-  neptuneNode.localMatrix = m4.scaling(20, 20, 20);
-  neptuneNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.2, 0.4, 0.6, 1],  // dark blue
-      u_colorMult:   [0.2, 0.2, 0.2, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  var plutoNode = new Node();
-  plutoNode.localMatrix = m4.scaling(20, 20, 20);
-  plutoNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.5, 0.5, 0.5, 1],  // gray
-      u_colorMult:   [0.1, 0.1, 0.1, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
-  };
-
-  // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-
   var moonNode = new Node();
-  moonNode.localMatrix = m4.scaling(2, 2, 2);
+  moonNode.localMatrix = m4.scaling(moonSize, moonSize, moonSize);
   moonNode.drawInfo = {
-    uniforms: {
-      u_colorOffset: [0.6, 0.6, 0.6, 1],  // gray
-      u_colorMult:   [0.1, 0.1, 0.1, 1],
-    },
-    programInfo: programInfo,
-    bufferInfo: sphereBufferInfo,
-    vertexArray: sphereVAO,
+    uniforms: { u_colorOffset: [0.6, 0.6, 0.6, 1], u_colorMult: [0.1, 0.1, 0.1, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
   };
 
-  // connect the celetial objects
+  var pioneer10OrbitNode = new Node();
+  var pioneer10Node = new Node();
+  pioneer10Node.localMatrix = m4.scaling(pioneer10Size, pioneer10Size, pioneer10Size);
+  pioneer10Node.drawInfo = {
+    uniforms: { u_colorOffset: [0.9, 0.9, 0.8, 1], u_colorMult: [0.1, 0.1, 0.1, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
+  };
+
+  var pioneer11OrbitNode = new Node();
+  var pioneer11Node = new Node();
+  pioneer11Node.localMatrix = m4.scaling(pioneer11Size, pioneer11Size, pioneer11Size);
+  pioneer11Node.drawInfo = {
+    uniforms: { u_colorOffset: [0.9, 0.9, 0.8, 1], u_colorMult: [0.1, 0.1, 0.1, 1] },
+    programInfo: planetProgramInfo, bufferInfo: sphereBufferInfo, vertexArray: sphereVAO,
+  };
+
+
+ //               SetParent                 \\
+// - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
   sunNode.setParent(solarSystemNode);
-  earthOrbitNode.setParent(solarSystemNode);
-  earthNode.setParent(earthOrbitNode);
-  marsOrbitNode.setParent(solarSystemNode);
-  marsNode.setParent(marsOrbitNode);
-  // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+  
   mercuryOrbitNode.setParent(solarSystemNode);
   mercuryNode.setParent(mercuryOrbitNode);
+
   venusOrbitNode.setParent(solarSystemNode);
   venusNode.setParent(venusOrbitNode);
+
+  earthOrbitNode.setParent(solarSystemNode);
+  earthNode.setParent(earthOrbitNode);
+
+  marsOrbitNode.setParent(solarSystemNode);
+  marsNode.setParent(marsOrbitNode);
+  
   jupiterOrbitNode.setParent(solarSystemNode);
   jupiterNode.setParent(jupiterOrbitNode);
+
   saturnOrbitNode.setParent(solarSystemNode);
   saturnNode.setParent(saturnOrbitNode);
-  uranusOrbitNode.setParent(solarSystemNode);
-  uranusNode.setParent(uranusOrbitNode);
-  neptuneOrbitNode.setParent(solarSystemNode);
-  neptuneNode.setParent(neptuneOrbitNode);
-  plutoOrbitNode.setParent(solarSystemNode);
-  plutoNode.setParent(plutoOrbitNode);
-  // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-  moonOrbitNode.setParent(earthOrbitNode);
+
+  moonOrbitNode.setParent(solarSystemNode); 
   moonNode.setParent(moonOrbitNode);
 
+  pioneer10OrbitNode.setParent(solarSystemNode);
+  pioneer10Node.setParent(pioneer10OrbitNode);
+
+  pioneer11OrbitNode.setParent(solarSystemNode);
+  pioneer11Node.setParent(pioneer11OrbitNode);
+
+
+
+   //           Lista de objetos (planetas)           \\
+  // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
   var objects = [
-    sunNode,
-    earthNode,
-    marsNode,
-    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-    mercuryNode,
-    venusNode,
-    jupiterNode,
-    saturnNode,
-    uranusNode,
-    neptuneNode,
-    plutoNode,
-    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-    moonNode,
+    sunNode, mercuryNode, venusNode, earthNode, marsNode, jupiterNode, saturnNode, moonNode, pioneer10Node, pioneer11Node,
+  ];
+  var objectsToDraw = objects.map(obj => obj.drawInfo);
+
+
+
+   //        Lista de objetos e buffers (órbitas)         \\
+  // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
+  const orbitDrawInfos = [];
+  const planetOrbitData = [
+      { name: "Mercury", positions: posicoesMercury, color: [0.7, 0.7, 0.7, 1] },
+      { name: "Venus",   positions: posicoesVenus,   color: [0.8, 0.6, 0.4, 1] },
+      { name: "Earth",   positions: posicoesEarth,   color: [0.4, 0.6, 0.8, 1] },
+      { name: "Mars",    positions: posicoesMars,    color: [1.0, 0.4, 0.3, 1] },
+      { name: "Jupiter", positions: posicoesJupiter, color: [0.8, 0.7, 0.6, 1] },
+      { name: "Saturn",  positions: posicoesSaturn,  color: [0.9, 0.8, 0.6, 1] },
+      { name: "Moon",    positions: posicoesMoon,    color: [0.6, 0.6, 0.6, 1] },
+      { name: "Pioneer10", positions: posicoesPioneer10, color: [0.9, 0.9, 0.8, 1] },
+      { name: "Pioneer11", positions: posicoesPioneer11, color: [0.9, 0.9, 0.8, 1] },
   ];
 
-  var objectsToDraw = [
-    sunNode.drawInfo,
-    earthNode.drawInfo,
-    marsNode.drawInfo,
-    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-    mercuryNode.drawInfo,
-    venusNode.drawInfo,
-    jupiterNode.drawInfo,
-    saturnNode.drawInfo,
-    uranusNode.drawInfo,
-    neptuneNode.drawInfo,
-    plutoNode.drawInfo,
-    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-    moonNode.drawInfo,
-  ];
+  for (const planetData of planetOrbitData) {
+      const positions = [];
+      for (const pos of planetData.positions) {
+          positions.push(pos.x, pos.y, pos.z);
+      }
+      const positionArray = new Float32Array(positions);
 
-  requestAnimationFrame(drawScene);
+      const arrays = {
+        position: { numComponents: 3, data: positionArray },
+      };
 
-  // Draw the scene.
+      const bufferInfo = twgl.createBufferInfoFromArrays(gl, arrays);
+      const vao = twgl.createVAOFromBufferInfo(gl, orbitProgramInfo, bufferInfo);
+
+      orbitDrawInfos.push({
+          vertexArray: vao,
+          bufferInfo: bufferInfo,
+          uniforms: {
+              u_matrix: m4.identity(),
+              u_color: planetData.color,
+          },
+      });
+  }
+
+  
+
+   //              drawScene              \\
+  // - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
+
   function drawScene(time) {
-    time *= 0.001;
+
+     //           Configurações iniciais            \\
+    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
 
     twgl.resizeCanvasToDisplaySize(gl.canvas);
-
-    // Tell WebGL how to convert from clip space to pixels
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-
     gl.enable(gl.CULL_FACE);
     gl.enable(gl.DEPTH_TEST);
-
-    // Clear the canvas AND the depth buffer.
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
 
-    // Compute the projection matrix
+    //               Matriz de projeção             \\
+    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
     const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
     const zNear = 1;
-    const zFar = 600000;
-    var projectionMatrix =
-        m4.perspective(fieldOfViewRadians, aspect, zNear, zFar);
+    const zFar = 6000000;
+    var projectionMatrix = m4.perspective(fieldOfViewRadians, aspect, zNear, zFar);
 
-    // Compute the camera's matrix using look at.
-    var cameraPosition = [infoCamera.x, infoCamera.y, infoCamera.z]; 
 
+    //               Matriz da câmera               \\
+    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
+    var cameraPosition = [infoCamera.x, infoCamera.y, infoCamera.z];
+    var target;
     if (infoCamera.cameraSolta) {
-      var x = cameraPosition[0] + infoCamera.lookDir[0];
-      var y = cameraPosition[1] + infoCamera.lookDir[1];
-      var z = cameraPosition[2] + infoCamera.lookDir[2];
-      var target = [x, y, z];
-    }
-    else {
-      var cameraPosition = [infoCamera.x, infoCamera.y, infoCamera.z];
-      var p = infoCamera.proximoPlaneta;
+      target = [
+        cameraPosition[0] + infoCamera.lookDir[0],
+        cameraPosition[1] + infoCamera.lookDir[1],
+        cameraPosition[2] + infoCamera.lookDir[2]
+      ];
+    } else {
       const dia = infoMundo.tempoPercorrido;
-      var planeta;
-
+      var p = infoCamera.proximoPlaneta;
+      var planetaPos;
       switch (p) {
-        // 0 = sol, 1 = mercury, 2 = venus, 3 = earth, 4 = moon, 5 = mars, 6 = jupiter, 7 = saturn
-        case 0: planeta = { x: 0, y: 0, z: 0 }; break;
-        case 1: planeta = posicoesMercury[dia]; break;
-        case 2: planeta = posicoesVenus[dia]; break;
-        case 3: planeta = posicoesEarth[dia]; break;
-        case 4: planeta = posicoesMoon[dia]; break;
-        case 5: planeta = posicoesMars[dia]; break;
-        case 6: planeta = posicoesJupiter[dia]; break;
-        case 7: planeta = posicoesSaturn[dia]; break;
+        case 0: planetaPos = { x: 0, y: 0, z: 0 }; break;
+        case 1: planetaPos = posicoesMercury[dia % posicoesMercury.length]; break;
+        case 2: planetaPos = posicoesVenus[dia % posicoesVenus.length]; break;
+        case 3: planetaPos = posicoesEarth[dia % posicoesEarth.length]; break;
+        case 4: planetaPos = posicoesMoon[dia % posicoesMoon.length]; break;
+        case 5: planetaPos = posicoesMars[dia % posicoesMars.length]; break;
+        case 6: planetaPos = posicoesJupiter[dia % posicoesJupiter.length]; break;
+        case 7: planetaPos = posicoesSaturn[dia % posicoesSaturn.length]; break;
+        case 8: planetaPos = posicoesPioneer10[dia % posicoesPioneer10.length]; break;
+        case 9: planetaPos = posicoesPioneer11[dia % posicoesPioneer11.length]; break;
       }
-
-      var target = [planeta.x, planeta.y, planeta.z];
+      target = [planetaPos.x, planetaPos.y, planetaPos.z];
     }
-
-    // var up = [0, 0, 1];
     var cameraMatrix = m4.lookAt(cameraPosition, target, infoCamera.upDir);
-    
-
-    // Make a view matrix from the camera matrix.
     var viewMatrix = m4.inverse(cameraMatrix);
-
     var viewProjectionMatrix = m4.multiply(projectionMatrix, viewMatrix);
 
 
-    const TESTE_ANTIGO = false;
-    const TESTE_NOVO = true;
 
-    if (TESTE_ANTIGO) {
-      // mercury, venus, earth, mars, jupiter, saturn, uranus, neptune, pluto, moon
-
-      var {x, y, z} = getOrbitNode(infoMercury);
-      mercuryOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var {x, y, z} = getOrbitNode(infoVenus);
-      venusOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var {x, y, z} = getOrbitNode(infoEarth);
-      earthOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var {x, y, z} = getOrbitNode(infoMars);
-      marsOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var {x, y, z} = getOrbitNode(infoJupiter);
-      jupiterOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      // a partir desse aqui, começa a ficar bem distante...
-
+    //          Atualizando matriz dos objetos            \\
+    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - - _ - \\
     
-      var {x, y, z} = getOrbitNode(infoSaturn);
-      saturnOrbitNode.localMatrix = m4.translation(x, y, z);
+    var dia = infoMundo.tempoPercorrido;
 
-      var {x, y, z} = getOrbitNode(infoUranus);
-      uranusOrbitNode.localMatrix = m4.translation(x, y, z);
+    // nós de cada órbita
+    mercuryOrbitNode.localMatrix = m4.translation(posicoesMercury[dia % posicoesMercury.length].x, posicoesMercury[dia % posicoesMercury.length].y, posicoesMercury[dia % posicoesMercury.length].z);
+    venusOrbitNode.localMatrix = m4.translation(posicoesVenus[dia % posicoesVenus.length].x, posicoesVenus[dia % posicoesVenus.length].y, posicoesVenus[dia % posicoesVenus.length].z);
+    earthOrbitNode.localMatrix = m4.translation(posicoesEarth[dia % posicoesEarth.length].x, posicoesEarth[dia % posicoesEarth.length].y, posicoesEarth[dia % posicoesEarth.length].z);
+    marsOrbitNode.localMatrix = m4.translation(posicoesMars[dia % posicoesMars.length].x, posicoesMars[dia % posicoesMars.length].y, posicoesMars[dia % posicoesMars.length].z);
+    jupiterOrbitNode.localMatrix = m4.translation(posicoesJupiter[dia % posicoesJupiter.length].x, posicoesJupiter[dia % posicoesJupiter.length].y, posicoesJupiter[dia % posicoesJupiter.length].z);
+    saturnOrbitNode.localMatrix = m4.translation(posicoesSaturn[dia % posicoesSaturn.length].x, posicoesSaturn[dia % posicoesSaturn.length].y, posicoesSaturn[dia % posicoesSaturn.length].z);
+    moonOrbitNode.localMatrix = m4.translation(posicoesMoon[dia % posicoesMoon.length].x, posicoesMoon[dia % posicoesMoon.length].y, posicoesMoon[dia % posicoesMoon.length].z);
+    pioneer10OrbitNode.localMatrix = m4.translation(posicoesPioneer10[dia % posicoesPioneer10.length].x, posicoesPioneer10[dia % posicoesPioneer10.length].y, posicoesPioneer10[dia % posicoesPioneer10.length].z);
+    pioneer11OrbitNode.localMatrix = m4.translation(posicoesPioneer11[dia % posicoesPioneer11.length].x, posicoesPioneer11[dia % posicoesPioneer11.length].y, posicoesPioneer11[dia % posicoesPioneer11.length].z);
 
-      var {x, y, z} = getOrbitNode(infoNeptune);
-      neptuneOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var {x, y, z} = getOrbitNode(infoPluto);
-      plutoOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var {x, y, z} = getOrbitNode(infoMoon);
-      moonOrbitNode.localMatrix = m4.translation(x, y, z);
-    }
-
-    else if (TESTE_NOVO) {
-
-      // mercury, venus, earth, mars, jupiter, saturn, uranus, neptune, pluto
-      var dia = infoMundo.tempoPercorrido;
-
-      var x = posicoesMercury[dia].x;
-      var y = posicoesMercury[dia].y;
-      var z = posicoesMercury[dia].z;
-      mercuryOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var x = posicoesVenus[dia].x;
-      var y = posicoesVenus[dia].y;
-      var z = posicoesVenus[dia].z;
-      venusOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var x = posicoesEarth[dia].x;
-      var y = posicoesEarth[dia].y;
-      var z = posicoesEarth[dia].z;
-      earthNode.localMatrix = m4.translation(x, y, z);
-
-      var x = posicoesMars[dia].x;
-      var y = posicoesMars[dia].y;
-      var z = posicoesMars[dia].z;
-      marsOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var x = posicoesJupiter[dia].x;
-      var y = posicoesJupiter[dia].y;
-      var z = posicoesJupiter[dia].z;
-      jupiterOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var x = posicoesSaturn[dia].x;
-      var y = posicoesSaturn[dia].y;
-      var z = posicoesSaturn[dia].z;
-      saturnOrbitNode.localMatrix = m4.translation(x, y, z);
-
-      var x = posicoesMoon[dia].x;
-      var y = posicoesMoon[dia].y;
-      var z = posicoesMoon[dia].z;
-      moonOrbitNode.localMatrix = m4.translation(x, y, z);
-    }
-
-
-
-    // update the local matrices for each object.
-    m4.multiply(m4.yRotation(0.01), earthOrbitNode.localMatrix, earthOrbitNode.localMatrix);
-    m4.multiply(m4.yRotation(0.01), marsOrbitNode.localMatrix, marsOrbitNode.localMatrix);
-    m4.multiply(m4.yRotation(0.01), moonOrbitNode.localMatrix, moonOrbitNode.localMatrix);
-    // spin the sun
+    // rotação
     m4.multiply(m4.yRotation(0.005), sunNode.localMatrix, sunNode.localMatrix);
-    // spin the earth
     m4.multiply(m4.yRotation(0.05), earthNode.localMatrix, earthNode.localMatrix);
-    // spin mars
     m4.multiply(m4.yRotation(0.05), marsNode.localMatrix, marsNode.localMatrix);
-    
-    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-
-    // spin mercury
-    m4.multiply(m4.yRotation(0.02), mercuryOrbitNode.localMatrix, mercuryOrbitNode.localMatrix);
-    // spin venus
-    m4.multiply(m4.yRotation(0.02), venusOrbitNode.localMatrix, venusOrbitNode.localMatrix);
-    // spin jupiter
-    m4.multiply(m4.yRotation(0.01), jupiterOrbitNode.localMatrix, jupiterOrbitNode.localMatrix);
-    // spin saturn
-    m4.multiply(m4.yRotation(0.01), saturnOrbitNode.localMatrix, saturnOrbitNode.localMatrix);
-    // spin uranus
-    m4.multiply(m4.yRotation(0.01), uranusOrbitNode.localMatrix, uranusOrbitNode.localMatrix);
-    // spin neptune
-    m4.multiply(m4.yRotation(0.01), neptuneOrbitNode.localMatrix, neptuneOrbitNode.localMatrix);
-    // spin pluto
-    m4.multiply(m4.yRotation(0.01), plutoOrbitNode.localMatrix, plutoOrbitNode.localMatrix);
-
-    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
-
-    // spin the moon
+    m4.multiply(m4.yRotation(0.02), mercuryNode.localMatrix, mercuryNode.localMatrix);
+    m4.multiply(m4.yRotation(0.02), venusNode.localMatrix, venusNode.localMatrix);
+    m4.multiply(m4.yRotation(0.01), jupiterNode.localMatrix, jupiterNode.localMatrix);
+    m4.multiply(m4.yRotation(0.01), saturnNode.localMatrix, saturnNode.localMatrix);
     m4.multiply(m4.yRotation(-0.01), moonNode.localMatrix, moonNode.localMatrix);
 
-    // Update all world matrices in the scene graph
+    // atualiza todas as matrizes do mundo na árvore da cena
     solarSystemNode.updateWorldMatrix();
 
-
-
-    /*
-      tenho um vetor de posições. Cada planeta tem um periodo orbital.
-      Vou ter um if para cada planeta, verificando se terminou uma
-      translação. Se terminou, incrementa um buffer de posições da
-      translação atual do planeta, e faz uma solicitação para desenhar
-      a órbita do planeta.
-        -> acho que só precisa fazer o desenho uma vez.
-    */
-
-      // desenho das órbitas planetárias
-    const a_position = gl.getAttribLocation(programInfo.program, "a_position");
-    gl.enableVertexAttribArray(a_position);
-    gl.vertexAttribPointer(a_position, 3, gl.FLOAT, false, 0, 0);
-    gl.useProgram(programInfo.program);
-
-    const planetas = [
-      { nome: "mercury", periodo: periodoMercury, posicoes: posicoesMercury },
-      { nome: "venus",   periodo: periodoVenus,   posicoes: posicoesVenus },
-      { nome: "earth",   periodo: periodoEarth,   posicoes: posicoesEarth },
-      { nome: "mars",    periodo: periodoMars,    posicoes: posicoesMars },
-      { nome: "jupiter", periodo: periodoJupiter, posicoes: posicoesJupiter },
-      { nome: "saturn",  periodo: periodoSaturn,  posicoes: posicoesSaturn },
-      { nome: "moon",    periodo: periodoMoon,    posicoes: posicoesMoon }
-    ];
-
-    // estava tendo problema com dias duplicados por conta do setInterval.
-    // esse ultimoDiaUpdate vai ser usado pra não rodar múltiplas vezes no
-    // mesmo dia.
-    planetas.forEach(p => p.ultimoDiaUpdate = -1);
-
-    planetas.forEach(planeta => {
-
-      // se já rodou nesse dia, não rodar de novo.
-      if (infoMundo.tempoPercorrido === planeta.ultimoDiaUpdate) {
-        console.log("Repetiu o dia ", dia)
-      }
-
-      const { nome, periodo, posicoes } = planeta;
-
-      // atualiza o buffer da órbita se a translação foi completada
-      if (infoMundo.tempoPercorrido % periodo === 0) {
-        
-        if (nome === "mercury") {
-          console.log("Atualizando orbita para ", nome);
-        }
-        
-        atualizarBufferDaOrbita(gl, bufferOrbita[nome], posicoes, periodo);
-      }
-
-      // desenha a órbita
-      gl.bindBuffer(gl.ARRAY_BUFFER, bufferOrbita[nome]);
-      gl.vertexAttribPointer(a_position, 3, gl.FLOAT, false, 0, 0);
-      gl.drawArrays(gl.LINE_STRIP, 0, periodo);
-    });
-
-
-
-    // Compute all the matrices for rendering
+    // calcula a matriz final pra cada objeto a ser desenhado
     objects.forEach(function(object) {
-        object.drawInfo.uniforms.u_matrix = m4.multiply(viewProjectionMatrix, object.worldMatrix);
+      object.drawInfo.uniforms.u_matrix = m4.multiply(viewProjectionMatrix, object.worldMatrix);
+
+      if (object === sunNode) {
+          object.drawInfo.uniforms.u_world = object.worldMatrix;
+          object.drawInfo.uniforms.u_time = time * 0.1;
+          object.drawInfo.uniforms.u_cameraPosition = cameraPosition;
+      }
     });
 
-    // ------ DEBUGGING -------- \\
-
-    // mercury, venus, earth, mars, jupiter, saturn, moon
-
-    // console.log("Escala - saturn: ", saturn);
-    /*
-    console.log("Posição - jupiter (dia ", dia, 
-                          posicoesJupiter[dia + 0],
-                          posicoesJupiter[dia + 1],
-                          posicoesJupiter[dia + 2]
-    );
-    */
-
-    // console.log("Posição da camera - ", infoCamera.x, infoCamera.y, infoCamera.z);
-
-    console.log("Dia atual:", infoMundo.tempoPercorrido);
-
-
-
-    // ------ Draw the objects -------- \\
+    
+     //            Desenha os planetas              \\
+    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
 
     twgl.drawObjectList(gl, objectsToDraw);
 
+
+     //            Desenha as órbitas               \\
+    // - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
+    gl.useProgram(orbitProgramInfo.program);
+
+    orbitDrawInfos.forEach(drawInfo => {
+      gl.bindVertexArray(drawInfo.vertexArray);
+      
+      twgl.setUniforms(orbitProgramInfo, {
+        u_matrix: viewProjectionMatrix,
+        u_color: drawInfo.uniforms.u_color,
+      });
+
+      twgl.drawBufferInfo(gl, drawInfo.bufferInfo, gl.LINE_STRIP);
+    });
+
+
     requestAnimationFrame(drawScene);
+
+
+     //             Debug               \\
+    // - _ - _ - _ - _ - _ - _ - _ - _ - \\
+
+    var dia = infoMundo.tempoPercorrido;
+
+    if (false) {
+      console.log("LookDir: ", infoCamera.lookDir);
+      console.log("UpDir: ", infoCamera.upDir);
+      console.log("LeftDir: ", infoCamera.leftDir);
+    }
+
+    if (true) {
+      console.log("Dia atual: ", infoMundo.tempoPercorrido);
+    }
+    
+    if (false) {
+      console.log("Dia (", dia, ") - coord Lua: ", posicoesMoon[dia]);
+      console.log("Dia (", dia, ") - coord Terra: ", posicoesEarth[dia]);
+    }
+
   }
+
+  // essa é a primeira chamada para drawScene. Depois, ela fica em loop
+  // durante toda a execução.
+  requestAnimationFrame(drawScene);
 }
 
 main();
